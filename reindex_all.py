@@ -5,10 +5,8 @@ Run this inside the Open WebUI container with the app already initialized
 """
 
 import sys
-import os
 import logging
 import time
-import asyncio
 
 print("Script started!", flush=True)
 
@@ -124,35 +122,34 @@ def reindex_standalone_files(app):
     
     success_count = 0
     failed_files = []
-    files_with_collections = 0
     
     for i, file in enumerate(files, 1):
         try:
-            file_collection = f"file-{file.id}"
-            
-            # Check if this file has its own collection
-            if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                files_with_collections += 1
-                log.info(f"[{i}/{len(files)}] Reindexing file: {file.filename} (ID: {file.id})")
-                
-                # Delete old collection
-                try:
-                    VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-                except Exception as e:
-                    log.warning(f"Could not delete collection for {file.id}: {e}")
-                    continue
-                
-                # Reprocess the file - collection_name=None means it will create file-{id} collection
-                process_file(
-                    request,
-                    ProcessFileForm(file_id=file.id, collection_name=None),
-                    user=admin_user
-                )
-                success_count += 1
-                log.info(f"  ✓ Successfully reindexed")
-            else:
+            # Only process files that have content (skip empty/placeholder files)
+            if not file.data or not file.data.get("content"):
                 if i % 100 == 0:
-                    log.debug(f"Checked {i}/{len(files)} files, found {files_with_collections} with collections")
+                    log.debug(f"Checked {i}/{len(files)} files, processing {success_count} so far")
+                continue
+            
+            file_collection = f"file-{file.id}"
+            log.info(f"[{i}/{len(files)}] Reindexing file: {file.filename} (ID: {file.id})")
+            
+            # Delete old collection if it exists
+            try:
+                if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
+                    log.info(f"  Deleted existing collection")
+            except Exception as e:
+                log.debug(f"  No existing collection to delete: {e}")
+            
+            # Process the file - collection_name=None means it will create file-{id} collection
+            process_file(
+                request,
+                ProcessFileForm(file_id=file.id, collection_name=None),
+                user=admin_user
+            )
+            success_count += 1
+            log.info(f"  ✓ Successfully reindexed")
                 
         except Exception as e:
             log.error(f"Failed to reindex file {file.filename} (ID: {file.id}): {e}")
@@ -163,7 +160,7 @@ def reindex_standalone_files(app):
             })
             continue
     
-    log.info(f"File reindexing complete. Total files checked: {len(files)}, With collections: {files_with_collections}, Success: {success_count}, Failed: {len(failed_files)}")
+    log.info(f"File reindexing complete. Total files checked: {len(files)}, Successfully reindexed: {success_count}, Failed: {len(failed_files)}")
     return success_count, failed_files
 
 
@@ -227,27 +224,30 @@ def reindex_folder_files(app):
                         log.warning(f"  File {file_id} not found, skipping")
                         continue
                     
-                    file_collection = f"file-{file.id}"
+                    # Only process files that have content
+                    if not file.data or not file.data.get("content"):
+                        log.debug(f"  File {file.filename} has no content, skipping")
+                        continue
                     
-                    # Check if this file has its own collection
-                    if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                        log.info(f"  Reindexing file: {file.filename} (ID: {file.id})")
-                        
-                        # Delete old collection
-                        try:
+                    file_collection = f"file-{file.id}"
+                    log.info(f"  Reindexing file: {file.filename} (ID: {file.id})")
+                    
+                    # Delete old collection if it exists
+                    try:
+                        if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
                             VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-                        except Exception as e:
-                            log.warning(f"  Could not delete collection for {file.id}: {e}")
-                            continue
-                        
-                        # Reprocess the file
-                        process_file(
-                            request,
-                            ProcessFileForm(file_id=file.id, collection_name=None),
-                            user=admin_user
-                        )
-                        success_count += 1
-                        log.info(f"    ✓ Successfully reindexed")
+                            log.info(f"    Deleted existing collection")
+                    except Exception as e:
+                        log.debug(f"    No existing collection to delete: {e}")
+                    
+                    # Reprocess the file
+                    process_file(
+                        request,
+                        ProcessFileForm(file_id=file.id, collection_name=None),
+                        user=admin_user
+                    )
+                    success_count += 1
+                    log.info(f"    ✓ Successfully reindexed")
                         
                 except Exception as e:
                     log.error(f"  Failed to reindex file {file_id}: {e}")
