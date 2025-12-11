@@ -132,12 +132,31 @@ def reindex_standalone_files(app):
             # Only process files that have content (skip empty/placeholder files)
             if not file.data or not file.data.get("content"):
                 skipped_count += 1
-                if i % 100 == 0:
+                if i % 10 == 0:
                     progress_pct = (i / total_files) * 100
                     log.info(f"Progress: {i}/{total_files} ({progress_pct:.1f}%) - Processed: {success_count}, Skipped: {skipped_count}")
                 continue
             
             file_collection = f"file-{file.id}"
+            
+            # Check if file already has embeddings in pgvector
+            try:
+                if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                    # Check if collection has any documents
+                    result = VECTOR_DB_CLIENT.query(
+                        collection_name=file_collection,
+                        filter={"file_id": file.id}
+                    )
+                    if result and len(result.ids[0]) > 0:
+                        skipped_count += 1
+                        if i % 10 == 0:
+                            progress_pct = (i / total_files) * 100
+                            log.info(f"Progress: {i}/{total_files} ({progress_pct:.1f}%) - Processed: {success_count}, Skipped: {skipped_count}")
+                        log.debug(f"[{i}/{total_files}] Skipping file {file.filename} - already has {len(result.ids[0])} embeddings")
+                        continue
+            except Exception as e:
+                log.debug(f"Error checking collection for {file.id}: {e}")
+            
             progress_pct = (i / total_files) * 100
             log.info(f"[{i}/{total_files} - {progress_pct:.1f}%] Reindexing file: {file.filename} (ID: {file.id})")
             
@@ -241,6 +260,21 @@ def reindex_folder_files(app):
                         continue
                     
                     file_collection = f"file-{file.id}"
+                    
+                    # Check if file already has embeddings in pgvector
+                    try:
+                        if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                            # Check if collection has any documents
+                            result = VECTOR_DB_CLIENT.query(
+                                collection_name=file_collection,
+                                filter={"file_id": file.id}
+                            )
+                            if result and len(result.ids[0]) > 0:
+                                log.debug(f"  Skipping file {file.filename} - already has {len(result.ids[0])} embeddings")
+                                continue
+                    except Exception as e:
+                        log.debug(f"  Error checking collection for {file.id}: {e}")
+                    
                     log.info(f"  Reindexing file: {file.filename} (ID: {file.id})")
                     
                     # Delete old collection if it exists
