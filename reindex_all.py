@@ -36,11 +36,10 @@ def reindex_knowledge_bases(app):
     request.app = app
     
     # Get admin user
-    admin_users = Users.get_user_by_role("admin")
-    if not admin_users:
+    admin_user = Users.get_super_admin_user()
+    if not admin_user:
         log.error("No admin user found!")
         return 0, []
-    admin_user = admin_users[0]
     
     knowledge_bases = Knowledges.get_knowledge_bases()
     log.info(f"Starting reindexing for {len(knowledge_bases)} knowledge bases")
@@ -115,11 +114,10 @@ def reindex_standalone_files(app):
     request.app = app
     
     # Get admin user
-    admin_users = Users.get_user_by_role("admin")
-    if not admin_users:
+    admin_user = Users.get_super_admin_user()
+    if not admin_user:
         log.error("No admin user found!")
         return 0, []
-    admin_user = admin_users[0]
     
     files = Files.get_files()
     log.info(f"Checking {len(files)} files for standalone collections")
