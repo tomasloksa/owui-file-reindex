@@ -167,6 +167,100 @@ def reindex_standalone_files(app):
     return success_count, failed_files
 
 
+def reindex_folder_files(app):
+    """Reindex all files referenced in folders"""
+    from open_webui.models.folders import Folders
+    from open_webui.models.files import Files
+    from open_webui.models.users import Users
+    from open_webui.routers.retrieval import ProcessFileForm, process_file
+    from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+    
+    # Create request object from app
+    class Request:
+        pass
+    
+    request = Request()
+    request.app = app
+    
+    # Get admin user
+    admin_user = Users.get_super_admin_user()
+    if not admin_user:
+        log.error("No admin user found!")
+        return 0, []
+    
+    # Get all users and then get their folders
+    all_users = Users.get_users()
+    log.info(f"Checking folders for {len(all_users)} users")
+    
+    success_count = 0
+    failed_files = []
+    processed_file_ids = set()  # Track processed files to avoid duplicates
+    total_folders = 0
+    
+    for user in all_users:
+        user_folders = Folders.get_folders_by_user_id(user.id)
+        total_folders += len(user_folders)
+        
+        for folder in user_folders:
+            if not folder.data or "files" not in folder.data:
+                continue
+            
+            folder_files = folder.data.get("files", [])
+            if not folder_files:
+                continue
+                
+            log.info(f"Processing folder '{folder.name}' (user: {user.email}) with {len(folder_files)} file references")
+            
+            for file_ref in folder_files:
+                if file_ref.get("type") != "file":
+                    continue  # Skip collections, only process files
+                
+                file_id = file_ref.get("id")
+                if not file_id or file_id in processed_file_ids:
+                    continue  # Skip if already processed
+                
+                processed_file_ids.add(file_id)
+                
+                try:
+                    file = Files.get_file_by_id(file_id)
+                    if not file:
+                        log.warning(f"  File {file_id} not found, skipping")
+                        continue
+                    
+                    file_collection = f"file-{file.id}"
+                    
+                    # Check if this file has its own collection
+                    if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                        log.info(f"  Reindexing file: {file.filename} (ID: {file.id})")
+                        
+                        # Delete old collection
+                        try:
+                            VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
+                        except Exception as e:
+                            log.warning(f"  Could not delete collection for {file.id}: {e}")
+                            continue
+                        
+                        # Reprocess the file
+                        process_file(
+                            request,
+                            ProcessFileForm(file_id=file.id, collection_name=None),
+                            user=admin_user
+                        )
+                        success_count += 1
+                        log.info(f"    ✓ Successfully reindexed")
+                        
+                except Exception as e:
+                    log.error(f"  Failed to reindex file {file_id}: {e}")
+                    failed_files.append({
+                        "file_id": file_id,
+                        "error": str(e)
+                    })
+                    continue
+    
+    log.info(f"Folder files reindexing complete. Total folders: {total_folders}, Unique files found: {len(processed_file_ids)}, Success: {success_count}, Failed: {len(failed_files)}")
+    return success_count, failed_files
+
+
 def main():
     log.info("=" * 80)
     log.info("Starting complete reindexing process")
@@ -200,6 +294,13 @@ def main():
         file_success, file_failed = reindex_standalone_files(app)
         log.info(f"✓ Standalone files reindexed: {file_success}, failed: {len(file_failed)}")
         
+        # Step 3: Reindex files in folders
+        log.info("\n" + "=" * 80)
+        log.info("STEP 3: Reindexing Files in Folders")
+        log.info("=" * 80)
+        folder_file_success, folder_file_failed = reindex_folder_files(app)
+        log.info(f"✓ Folder files reindexed: {folder_file_success}, failed: {len(folder_file_failed)}")
+        
         elapsed = time.time() - start_time
         
         log.info("\n" + "=" * 80)
@@ -208,14 +309,16 @@ def main():
         log.info(f"Total time: {elapsed:.2f} seconds ({elapsed/60:.1f} minutes)")
         log.info(f"Knowledge bases reindexed: {kb_success}")
         log.info(f"Standalone files reindexed: {file_success}")
-        log.info(f"Total failed files: {len(file_failed)}")
+        log.info(f"Folder files reindexed: {folder_file_success}")
+        log.info(f"Total failed files: {len(file_failed) + len(folder_file_failed)}")
         
-        if file_failed:
+        all_failed = file_failed + folder_file_failed
+        if all_failed:
             log.warning("\nFailed files:")
-            for failed in file_failed[:10]:  # Show first 10
-                log.warning(f"  - {failed['filename']} ({failed['file_id']}): {failed['error']}")
-            if len(file_failed) > 10:
-                log.warning(f"  ... and {len(file_failed) - 10} more")
+            for failed in all_failed[:10]:  # Show first 10
+                log.warning(f"  - {failed.get('filename', 'Unknown')} ({failed['file_id']}): {failed['error']}")
+            if len(all_failed) > 10:
+                log.warning(f"  ... and {len(all_failed) - 10} more")
         
         log.info("\n✓ Migration from ChromaDB to pgvector is complete!")
         log.info("You can now use your Open WebUI application with pgvector.")
