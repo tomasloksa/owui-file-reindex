@@ -40,12 +40,13 @@ def reindex_knowledge_bases(app):
         return 0, []
     
     knowledge_bases = Knowledges.get_knowledge_bases()
-    log.info(f"Starting reindexing for {len(knowledge_bases)} knowledge bases")
+    total_kbs = len(knowledge_bases)
+    log.info(f"Starting reindexing for {total_kbs} knowledge bases")
     
     deleted_knowledge_bases = []
     success_count = 0
     
-    for knowledge_base in knowledge_bases:
+    for kb_idx, knowledge_base in enumerate(knowledge_bases, 1):
         if not knowledge_base.data or not isinstance(knowledge_base.data, dict):
             log.warning(f"Knowledge base {knowledge_base.id} has no data. Deleting.")
             try:
@@ -59,7 +60,8 @@ def reindex_knowledge_bases(app):
             file_ids = knowledge_base.data.get("file_ids", [])
             files = Files.get_files_by_ids(file_ids)
             
-            log.info(f"Reindexing knowledge base: {knowledge_base.name} ({knowledge_base.id}) - {len(files)} files")
+            progress_pct = (kb_idx / total_kbs) * 100
+            log.info(f"[{kb_idx}/{total_kbs} - {progress_pct:.1f}%] Reindexing knowledge base: {knowledge_base.name} ({knowledge_base.id}) - {len(files)} files")
             
             try:
                 if VECTOR_DB_CLIENT.has_collection(collection_name=knowledge_base.id):
@@ -118,21 +120,26 @@ def reindex_standalone_files(app):
         return 0, []
     
     files = Files.get_files()
-    log.info(f"Checking {len(files)} files for standalone collections")
+    total_files = len(files)
+    log.info(f"Checking {total_files} files for standalone collections")
     
     success_count = 0
     failed_files = []
+    skipped_count = 0
     
     for i, file in enumerate(files, 1):
         try:
             # Only process files that have content (skip empty/placeholder files)
             if not file.data or not file.data.get("content"):
+                skipped_count += 1
                 if i % 100 == 0:
-                    log.debug(f"Checked {i}/{len(files)} files, processing {success_count} so far")
+                    progress_pct = (i / total_files) * 100
+                    log.info(f"Progress: {i}/{total_files} ({progress_pct:.1f}%) - Processed: {success_count}, Skipped: {skipped_count}")
                 continue
             
             file_collection = f"file-{file.id}"
-            log.info(f"[{i}/{len(files)}] Reindexing file: {file.filename} (ID: {file.id})")
+            progress_pct = (i / total_files) * 100
+            log.info(f"[{i}/{total_files} - {progress_pct:.1f}%] Reindexing file: {file.filename} (ID: {file.id})")
             
             # Delete old collection if it exists
             try:
@@ -160,7 +167,7 @@ def reindex_standalone_files(app):
             })
             continue
     
-    log.info(f"File reindexing complete. Total files checked: {len(files)}, Successfully reindexed: {success_count}, Failed: {len(failed_files)}")
+    log.info(f"File reindexing complete. Total files checked: {total_files}, Skipped: {skipped_count}, Successfully reindexed: {success_count}, Failed: {len(failed_files)}")
     return success_count, failed_files
 
 
@@ -187,14 +194,16 @@ def reindex_folder_files(app):
     
     # Get all users and then get their folders
     all_users = Users.get_users()
-    log.info(f"Checking folders for {len(all_users)} users")
+    total_users = len(all_users)
+    log.info(f"Checking folders for {total_users} users")
     
     success_count = 0
     failed_files = []
     processed_file_ids = set()  # Track processed files to avoid duplicates
     total_folders = 0
+    total_file_refs = 0
     
-    for user in all_users:
+    for user_idx, user in enumerate(all_users, 1):
         user_folders = Folders.get_folders_by_user_id(user.id)
         total_folders += len(user_folders)
         
@@ -205,8 +214,10 @@ def reindex_folder_files(app):
             folder_files = folder.data.get("files", [])
             if not folder_files:
                 continue
-                
-            log.info(f"Processing folder '{folder.name}' (user: {user.email}) with {len(folder_files)} file references")
+            
+            total_file_refs += len(folder_files)
+            user_progress_pct = (user_idx / total_users) * 100
+            log.info(f"[User {user_idx}/{total_users} - {user_progress_pct:.1f}%] Processing folder '{folder.name}' ({user.email}) with {len(folder_files)} file references")
             
             for file_ref in folder_files:
                 if file_ref.get("type") != "file":
@@ -257,7 +268,7 @@ def reindex_folder_files(app):
                     })
                     continue
     
-    log.info(f"Folder files reindexing complete. Total folders: {total_folders}, Unique files found: {len(processed_file_ids)}, Success: {success_count}, Failed: {len(failed_files)}")
+    log.info(f"Folder files reindexing complete. Total users: {total_users}, Total folders: {total_folders}, Total file references: {total_file_refs}, Unique files found: {len(processed_file_ids)}, Success: {success_count}, Failed: {len(failed_files)}")
     return success_count, failed_files
 
 
