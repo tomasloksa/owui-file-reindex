@@ -2,6 +2,8 @@
 
 A Python script for reindexing files in Open WebUI after a vector database migration. This script processes standalone files and restores their vector database collections without deleting any existing data.
 
+Tested on OWUI v0.6.41.
+
 ## What It Does
 
 This script reindexes all standalone files in Open WebUI by:
