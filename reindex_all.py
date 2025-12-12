@@ -47,7 +47,7 @@ def reindex_standalone_files(app):
     
     files = Files.get_files()
     total_files = len(files)
-    log_info(f"Checking {total_files} files for standalone collections")
+    log_info(f"Checking {total_files} files for reindexing...")
     
     success_count = 0
     failed_files = []
@@ -140,7 +140,7 @@ def main():
         log_info("REINDEXING COMPLETE!")
         log_info("=" * 80)
         log_info(f"Total time: {elapsed:.2f} seconds ({elapsed/60:.1f} minutes)")
-        log_info(f"Standalone files reindexed: {file_success}")
+        log_info(f"Files reindexed: {file_success}")
         
         all_failed = file_failed
         if all_failed:
@@ -149,9 +149,6 @@ def main():
                 log_info(f"  - {failed.get('filename', 'Unknown')} ({failed['file_id']}): {failed['error']}")
             if len(all_failed) > 10:
                 log_info(f"  ... and {len(all_failed) - 10} more")
-        
-        log_info("\n✓ Migration from ChromaDB to pgvector is complete!")
-        log_info("You can now use your Open WebUI application with pgvector.")
         
         sys.exit(0)
         
